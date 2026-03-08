@@ -1,0 +1,5 @@
+{
+  "name": "Random Route Generator",
+  "description": "Generate random walking and cycling routes of a specific distance.",
+  "requestFramePermissions": ["geolocation"]
+}
