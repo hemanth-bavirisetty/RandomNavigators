@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getSharedRouteFromUrl } from '../utils/sharing';
+import { getShareIdFromUrl, loadSharedRoute } from '../utils/sharing';
 import type { Activity, RouteStats } from '../types';
 
 type SharedRoute = {
@@ -10,17 +10,24 @@ type SharedRoute = {
 
 export function useSharedRoute() {
   const [sharedRoute, setSharedRoute] = useState<SharedRoute | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const data = getSharedRouteFromUrl();
-    if (data) {
-      setSharedRoute(data);
-      // Clean the hash from URL without triggering navigation
-      history.replaceState(null, '', window.location.pathname);
-    }
+    const shareId = getShareIdFromUrl();
+    if (!shareId) return;
+
+    setLoading(true);
+    loadSharedRoute(shareId)
+      .then((data) => {
+        if (data) setSharedRoute(data);
+        // Clean hash from URL
+        history.replaceState(null, '', window.location.pathname);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
   const clearShared = () => setSharedRoute(null);
 
-  return { sharedRoute, clearShared };
+  return { sharedRoute, loading: loading, clearShared };
 }

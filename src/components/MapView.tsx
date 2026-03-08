@@ -8,9 +8,10 @@ import {
   useMapEvents,
 } from 'react-leaflet';
 import L from 'leaflet';
-import { startIcon, endIcon, DARK_TILE_URL, DARK_TILE_ATTRIBUTION } from '../utils/leaflet';
-import type { PickingMode } from '../types';
+import { startIcon, endIcon, MAP_STYLES, TRANSPORT_OVERLAY, getTrafficOverlayUrl } from '../utils/leaflet';
+import type { PickingMode, MapStyle, MapOverlays } from '../types';
 import { Loader2 } from 'lucide-react';
+import MapStylePicker from './MapStylePicker';
 
 /* ─── Internal: fit map to route or center ─── */
 function MapUpdater({
@@ -34,7 +35,7 @@ function MapUpdater({
   return null;
 }
 
-/* ─── Internal: handle map taps for picking locations ─── */
+/* ─── Internal: handle map taps ─── */
 function MapEventsHandler({
   pickingMode,
   onLocationPicked,
@@ -51,23 +52,35 @@ function MapEventsHandler({
   });
 
   useEffect(() => {
-    if (pickingMode) {
-      map.getContainer().style.cursor = 'crosshair';
-    } else {
-      map.getContainer().style.cursor = '';
-    }
+    map.getContainer().style.cursor = pickingMode ? 'crosshair' : '';
   }, [pickingMode, map]);
 
   return null;
 }
 
-/* ─── Main MapView component ─── */
+/* ─── Determine route line color for visibility ─── */
+function getRouteColor(style: MapStyle): string {
+  switch (style) {
+    case 'light':
+    case 'standard':
+    case 'terrain':
+      return '#059669'; // darker green on light backgrounds
+    default:
+      return '#00F5A0'; // bright green on dark backgrounds
+  }
+}
+
+/* ─── Main MapView ─── */
 type MapViewProps = {
   startLocation: [number, number] | null;
   endLocation: [number, number] | null;
   routeCoords: [number, number][] | null;
   pickingMode: PickingMode;
   onLocationPicked: (latlng: [number, number]) => void;
+  mapStyle: MapStyle;
+  overlays: MapOverlays;
+  onStyleChange: (style: MapStyle) => void;
+  onOverlayToggle: (overlay: keyof MapOverlays) => void;
 };
 
 export default function MapView({
@@ -76,7 +89,14 @@ export default function MapView({
   routeCoords,
   pickingMode,
   onLocationPicked,
+  mapStyle,
+  overlays,
+  onStyleChange,
+  onOverlayToggle,
 }: MapViewProps) {
+  const tile = MAP_STYLES[mapStyle];
+  const trafficUrl = getTrafficOverlayUrl();
+
   if (!startLocation) {
     return (
       <div className="map-loading">
@@ -94,7 +114,22 @@ export default function MapView({
         className="map-container"
         zoomControl={false}
       >
-        <TileLayer attribution={DARK_TILE_ATTRIBUTION} url={DARK_TILE_URL} />
+        {/* Base tile layer */}
+        <TileLayer key={mapStyle} attribution={tile.attribution} url={tile.url} />
+
+        {/* Overlay: Public Transport */}
+        {overlays.transport && (
+          <TileLayer
+            url={TRANSPORT_OVERLAY.url}
+            attribution={TRANSPORT_OVERLAY.attribution}
+            opacity={0.7}
+          />
+        )}
+
+        {/* Overlay: Traffic */}
+        {overlays.traffic && trafficUrl && (
+          <TileLayer url={trafficUrl} opacity={0.6} />
+        )}
 
         <MapUpdater center={startLocation} routeCoords={routeCoords} />
         <MapEventsHandler
@@ -109,7 +144,7 @@ export default function MapView({
           <Polyline
             positions={routeCoords}
             pathOptions={{
-              color: '#00F5A0',
+              color: getRouteColor(mapStyle),
               weight: 4,
               opacity: 0.9,
               lineCap: 'round',
@@ -118,6 +153,14 @@ export default function MapView({
           />
         )}
       </MapContainer>
+
+      {/* Map style picker floating button */}
+      <MapStylePicker
+        mapStyle={mapStyle}
+        overlays={overlays}
+        onStyleChange={onStyleChange}
+        onOverlayToggle={onOverlayToggle}
+      />
 
       {pickingMode && (
         <div className="picking-banner">

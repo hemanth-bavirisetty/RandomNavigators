@@ -1,4 +1,4 @@
-import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from 'lz-string';
+import { supabase } from './supabase';
 import type { Activity, RouteStats } from '../types';
 
 type SharedRouteData = {
@@ -8,106 +8,69 @@ type SharedRouteData = {
 };
 
 /**
- * Delta-encode coordinates for better compression.
- * Stores the first point as-is, then deltas (multiplied by 1e5 and rounded).
+ * Save route to Supabase and return a short share ID.
  */
-function deltaEncode(coords: [number, number][]): number[] {
-  if (coords.length === 0) return [];
-
-  const encoded: number[] = [
-    Math.round(coords[0][0] * 1e5),
-    Math.round(coords[0][1] * 1e5),
-  ];
-
-  for (let i = 1; i < coords.length; i++) {
-    encoded.push(Math.round((coords[i][0] - coords[i - 1][0]) * 1e5));
-    encoded.push(Math.round((coords[i][1] - coords[i - 1][1]) * 1e5));
-  }
-
-  return encoded;
-}
-
-/**
- * Decode delta-encoded coordinates back to lat/lng pairs.
- */
-function deltaDecode(encoded: number[]): [number, number][] {
-  if (encoded.length < 2) return [];
-
-  const coords: [number, number][] = [
-    [encoded[0] / 1e5, encoded[1] / 1e5],
-  ];
-
-  for (let i = 2; i < encoded.length; i += 2) {
-    const prev = coords[coords.length - 1];
-    coords.push([
-      prev[0] + encoded[i] / 1e5,
-      prev[1] + encoded[i + 1] / 1e5,
-    ]);
-  }
-
-  return coords;
-}
-
-/**
- * Encode route data into a URL-safe compressed string.
- */
-export function encodeRoute(
+export async function shareRoute(
   coords: [number, number][],
   stats: RouteStats,
-  activity: Activity
-): string {
-  const payload = {
-    c: deltaEncode(coords),
-    d: Math.round(stats.distance * 100), // 2 decimal precision
-    t: Math.round(stats.duration),
-    a: activity === 'foot' ? 0 : 1,
+  activity: Activity,
+  userId: string
+): Promise<string> {
+  const routeData = {
+    coords,
+    distance: stats.distance,
+    duration: stats.duration,
+    activity,
   };
 
-  return compressToEncodedURIComponent(JSON.stringify(payload));
+  const { data, error } = await supabase
+    .from('shared_routes')
+    .insert({
+      route_data: routeData,
+      created_by: userId,
+    })
+    .select('id')
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data.id;
 }
 
 /**
- * Decode a compressed route string back to route data.
+ * Load a shared route by its short ID from Supabase.
  */
-export function decodeRoute(encoded: string): SharedRouteData | null {
-  try {
-    const json = decompressFromEncodedURIComponent(encoded);
-    if (!json) return null;
+export async function loadSharedRoute(
+  id: string
+): Promise<SharedRouteData | null> {
+  const { data, error } = await supabase
+    .from('shared_routes')
+    .select('route_data')
+    .eq('id', id)
+    .single();
 
-    const payload = JSON.parse(json);
-    return {
-      coords: deltaDecode(payload.c),
-      stats: {
-        distance: payload.d / 100,
-        duration: payload.t,
-      },
-      activity: payload.a === 0 ? 'foot' : 'bike',
-    };
-  } catch {
-    return null;
-  }
+  if (error || !data) return null;
+
+  const rd = data.route_data as any;
+  return {
+    coords: rd.coords,
+    stats: { distance: rd.distance, duration: rd.duration },
+    activity: rd.activity,
+  };
 }
 
 /**
- * Generate a full shareable URL for the given route.
+ * Generate a full short shareable URL.
  */
-export function generateShareUrl(
-  coords: [number, number][],
-  stats: RouteStats,
-  activity: Activity
-): string {
-  const hash = encodeRoute(coords, stats, activity);
+export function generateShareUrl(shareId: string): string {
   const base = `${window.location.origin}${window.location.pathname}`;
-  return `${base}#route=${hash}`;
+  return `${base}#s=${shareId}`;
 }
 
 /**
- * Try to extract shared route data from current URL hash.
+ * Check URL for a short share ID.
  */
-export function getSharedRouteFromUrl(): SharedRouteData | null {
+export function getShareIdFromUrl(): string | null {
   const hash = window.location.hash;
-  if (!hash.startsWith('#route=')) return null;
-
-  const encoded = hash.slice('#route='.length);
-  return decodeRoute(encoded);
+  if (!hash.startsWith('#s=')) return null;
+  return hash.slice(3);
 }

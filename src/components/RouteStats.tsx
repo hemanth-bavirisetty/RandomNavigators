@@ -1,23 +1,27 @@
 import React, { useState } from 'react';
-import { BookmarkPlus, Trash2, Route, Share2, Check } from 'lucide-react';
+import { BookmarkPlus, Trash2, Route, Share2, Check, Loader2 } from 'lucide-react';
 import type { RouteStats as RouteStatsType, Activity } from '../types';
-import { generateShareUrl } from '../utils/sharing';
+import { shareRoute, generateShareUrl } from '../utils/sharing';
 
 type RouteStatsProps = {
   stats: RouteStatsType;
   coords: [number, number][];
   activity: Activity;
+  userId: string;
   onSave: () => void;
   onClear: () => void;
 };
 
-export default function RouteStats({ stats, coords, activity, onSave, onClear }: RouteStatsProps) {
+export default function RouteStats({ stats, coords, activity, userId, onSave, onClear }: RouteStatsProps) {
+  const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const handleShare = async () => {
-    const url = generateShareUrl(coords, stats, activity);
-
+    setSharing(true);
     try {
+      const shareId = await shareRoute(coords, stats, activity, userId);
+      const url = generateShareUrl(shareId);
+
       // Try native share first (mobile)
       if (navigator.share) {
         await navigator.share({
@@ -25,16 +29,18 @@ export default function RouteStats({ stats, coords, activity, onSave, onClear }:
           text: `Check out this ${stats.distance.toFixed(1)}km ${activity === 'foot' ? 'walking' : 'cycling'} route!`,
           url,
         });
+        setSharing(false);
         return;
       }
 
       // Fallback: copy to clipboard
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Final fallback
-      prompt('Copy this link:', url);
+      setSharing(false);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (err: any) {
+      console.error('Share failed:', err);
+      setSharing(false);
     }
   };
 
@@ -46,8 +52,13 @@ export default function RouteStats({ stats, coords, activity, onSave, onClear }:
         </div>
         <span className="stats-title">Route</span>
         <div className="stats-actions">
-          <button onClick={handleShare} className={`stats-action-btn share ${copied ? 'copied' : ''}`} title="Share route">
-            {copied ? <Check size={18} /> : <Share2 size={18} />}
+          <button
+            onClick={handleShare}
+            disabled={sharing}
+            className={`stats-action-btn share ${copied ? 'copied' : ''}`}
+            title="Share route"
+          >
+            {sharing ? <Loader2 size={16} className="animate-spin" /> : copied ? <Check size={18} /> : <Share2 size={18} />}
           </button>
           <button onClick={onSave} className="stats-action-btn save" title="Save route">
             <BookmarkPlus size={18} />
@@ -75,7 +86,6 @@ export default function RouteStats({ stats, coords, activity, onSave, onClear }:
         </div>
       </div>
 
-      {/* Copied toast */}
       {copied && (
         <div className="copied-toast">
           Link copied to clipboard!
